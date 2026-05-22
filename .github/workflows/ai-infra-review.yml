@@ -1,0 +1,59 @@
+name: AI Infra Review
+on:
+  pull_request:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@3e21ee4ae75b22a2ebdacb5d2b0b875da49dd76f # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::160071257600:role/github-actions-terraform-role
+          aws-region: ap-south-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      - name: Convert Plan to JSON
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+
+      - name: Generate Infracost JSON
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+        run: |
+          infracost breakdown \
+            --path=tfplan \
+            --format=json \
+            --out-file=infracost.json
+
+      - name: Install Python Dependencies
+        run: pip install openai
+
+      - name: Run AI Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python scripts/ai_review.py
+
+      - name: Post PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: review.md
